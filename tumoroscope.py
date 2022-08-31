@@ -12,7 +12,7 @@ np.seterr(divide='ignore')
 
 class tumoroscope:
     def __init__(self, name, K, S, g, r, p, I, avarage_clone_in_spot, F, C, A, D, F_epsilon, optimal_rate, n_lambda,
-                 pi_2D, result_txt, Y, p_y, b_alpha, b_beta):
+                 pi_2D, result_txt, Y, p_y, b_alpha, b_beta, t=1, inits=None):
         self.name = name
         self.K = K
         self.S = S
@@ -20,16 +20,15 @@ class tumoroscope:
 
         if p is None or r is None:
             adjust = np.tile(n_lambda, (I, 1))
-            phi_samples = np.mean(D/(adjust.astype(float)),axis=1)#,(K,1)).transpose()
-            phi_samples[phi_samples==0] = np.min(phi_samples)
-            N = I
-            nomin = N*np.sum(phi_samples)
-            denomin = ((N*np.sum(phi_samples*np.log(phi_samples)))-(np.sum(np.log(phi_samples))*np.sum(phi_samples)))
-            self.r = nomin/denomin
-            self.p = (denomin*(1/(N*N)))
+            phi = D/(adjust.astype(float))
+            p = np.var(phi) / np.mean(phi) * 2
+            r = phi / p
+            self.r = r.mean()
+            self.p = p
         else:
             self.r = r
             self.p = p
+
 
         self.I = I
         self.avarage_clone_in_spot = avarage_clone_in_spot
@@ -44,6 +43,8 @@ class tumoroscope:
         self.p_y = p_y
         self.b_alpha = b_alpha
         self.b_beta = b_beta
+        self.t = t
+        self.inits = inits
 
         # self.cons = 5
         self.F = F
@@ -94,6 +95,7 @@ class tumoroscope:
         convergence_counter = 0
         first = time.time()
         self.max_iter = max_iter
+        self.min_iter = min_iter
         current_batch = 0
         iter = 0
         sigma_phi_initial = self.sigma_phi_initial
@@ -111,7 +113,10 @@ class tumoroscope:
                                     theta=self.theta_0, n_lambda=self.n_lambda, n_sampling=n_sampling,
                                     F_fraction=F_fraction, pi_2D=pi_2D, every_n_sample=every_n_sample,
                                     Y=self.Y, p_y=self.p_y, b_alpha=self.b_alpha, b_beta=self.b_beta)
-        n, H, G, pi, phi, Z, B = inits
+        if self.inits is None:
+            n, H, G, pi, phi, Z, B = inits
+        else:
+            n, H, G, pi, phi, Z, B = self.inits
 
         def step(n, H, G, pi, phi, Z, B, n_sampling):
             if n_sampling:
@@ -239,7 +244,6 @@ class tumoroscope:
         self.decision_matrix_G = np.zeros((S, K), dtype=np.float64)
         self.decision_matrix_n = np.zeros(S, dtype=np.float64)
         self.decision_matrix_B = np.zeros((K, g), dtype=np.float64)
-        self.sigmas_B = np.zeros((keep, K, g), dtype=np.float64)
         self.geweke_z_all = 1000 * np.ones(int(max_iter / batch), dtype=np.float64)
 
         # self.Z[0] = copy.deepcopy(sample.Z)
@@ -345,7 +349,6 @@ class tumoroscope:
         loglik_pre = copy.deepcopy(loglik)
         if ((iter + 1) % every_n_sample) == 0:
             self.H[self.iter_current] = copy.deepcopy(H)
-            self.sigmas_B[self.iter_current] = copy.deepcopy(self.sigma_B)
             # self.Z[self.iter_current] = copy.deepcopy(Z)
             self.loglik[self.iter_current] = copy.deepcopy(loglik)
             self.n_sum[current_batch] += n
@@ -362,7 +365,6 @@ class tumoroscope:
     def save_variables(self, n, H, G, pi, phi, Z, PZ, B, loglik, iter, every_n_sample, current_batch):
         if ((iter + 1) % every_n_sample) == 0:
             self.H[self.iter_current] = copy.deepcopy(H)
-            self.sigmas_B[self.iter_current] = copy.deepcopy(self.sigma_B)
             self.loglik[self.iter_current] = copy.deepcopy(loglik)
             self.n_sum[current_batch] += n
             self.H_sum[current_batch] += H
@@ -483,25 +485,13 @@ class tumoroscope:
         r = np.matmul(H, B)
         r = np.matmul(np.diag(n), r)
         r = np.matmul(r, np.diag(p_y / (1 - p_y)))
+        r = np.multiply(self.t, r)
         p_Y = scipy.stats.nbinom.logpmf(Y, r, p_y)  # Sxg
 
         p_n = scipy.stats.poisson.logpmf(n, n_lambda) + np.sum(p_dis, axis=0)
         p_n += np.sum(p_Y, axis=1)
         return p_n
 
-    def t_target_matrix(self, x, H, phi, D, I, n_lambda, Y, B, p_y, sections):  # [l1, l2, l3]
-        r = np.matmul(H, B)
-        r = np.matmul(np.diag(n * t), r)
-        r = np.matmul(r, np.diag(p_y / (1 - p_y)))
-        p_Y = scipy.stats.nbinom.logpmf(Y, r, p_y)  # Sxg
-
-        p_t = scipy.stats.gamma.logpmf(t_trunc, alpha, beta)  # 3
-        start = 0
-        for l_section in sections:
-            stop = start + l_section
-            p_t[start:stop] += np.sum(p_Y[start:stop, :], axis=1)
-            stop = start
-        return p_t
 
     ##############################################################################################################
     ################################################  sampling pi  ################################################
@@ -542,13 +532,6 @@ class tumoroscope:
 
         proposedx = self.trunc_norm_sampling_matrix(currentx, self.sigma_G)
 
-        # if self.iter == 1:
-        #     current_p = self.G_target(x=currentx, Z=Z, F=F, F_epsilon=F_epsilon, K=K, phi=phi, C=C, A=A, D=D, n=n, I=I,
-        #                               theta=theta, Y=Y, H=H, B=B, p_y=p_y)
-        #     self.p_G = current_p
-        # else:
-        #     current_p = self.p_G
-
         current_p = self.G_target(x=currentx, Z=Z, F=F, F_epsilon=F_epsilon, K=K, phi=phi, C=C, A=A, D=D, n=n, I=I,
                                   theta=theta, Y=Y, H=H, B=B, p_y=p_y)
         proposed_p = self.G_target(x=proposedx, Z=Z, F=F, F_epsilon=F_epsilon, K=K, phi=phi, C=C, A=A, D=D, n=n,
@@ -581,6 +564,7 @@ class tumoroscope:
         r = np.matmul(H, B)
         r = np.matmul(np.diag(n), r)
         r = np.matmul(r, np.diag(p_y / (1 - p_y)))
+        r = np.multiply(self.t, r)
         p_Y = scipy.stats.nbinom.logpmf(Y, r, p_y)  # Sxg
 
         p_gsk = scipy.stats.gamma.logpdf(a=np.power(F[:, 0], Z) * np.power(F_epsilon[:, 0], 1 - Z), x=x,
@@ -607,12 +591,6 @@ class tumoroscope:
             self.sigma_phi[self.sigma_phi <= 0] = sigma_phi_initial[self.sigma_phi <= 0]
 
         proposedx = self.trunc_norm_sampling_matrix(currentx, self.sigma_phi)
-
-        # if self.iter == 1:
-        #     current_p = self.phi_target(phi=currentx, r=r, p=p, K=K, H=H, C=C, A=A, D=D, n=n, I=I, theta=theta)
-        #     self.p_phi = current_p
-        # else:
-        #     current_p = self.p_phi
 
         current_p = self.phi_target(phi=currentx, r=r, p=p, K=K, H=H, C=C, A=A, D=D, n=n, I=I, theta=theta)
         proposed_p = self.phi_target(phi=proposedx, r=r, p=p, K=K, H=H, C=C, A=A, D=D, n=n, I=I, theta=theta)
@@ -657,6 +635,8 @@ class tumoroscope:
             self.sigma_B = self.sigma_B + ((self.decision_matrix_B / self.iter) - optimal_rate) * self.sigma_B
         elif self.iter == 1:
             self.sigma_B = sigma_B_initial
+        if self.iter == int(self.min_iter / 2):  # take care of very low values, where decision_matrix_B is still 0
+            self.sigma_B[self.decision_matrix_B==0] = 1e-50
         if np.sum(self.sigma_B <= 0) > 0:
             print("Problem: sigma_B<=0 ")
             self.sigma_B[self.sigma_B <= 0] = sigma_B_initial[self.sigma_B <= 0]
@@ -688,6 +668,7 @@ class tumoroscope:
         r = np.matmul(H, B)
         r = np.matmul(np.diag(n), r)
         r = np.matmul(r, np.diag(p_y / (1 - p_y)))  # Sxg
+        r = np.multiply(self.t, r)  # Sxg
         p_Y = scipy.stats.nbinom.logpmf(Y, r, p_y)  # Sxg
 
         p_B = scipy.stats.gamma.logpdf(B, a=b_alpha, scale=b_beta)  # Kxg

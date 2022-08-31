@@ -24,12 +24,12 @@ def trunc_norm_sampling_vector(mu, sigma):
     return y
 
 def run_in_parallel(args):
-    return (args.gibbs_sampling(seed=random.randint(1, 100), min_iter=min_iter, max_iter=max_iter,  # burn_in=burn_in,
+    return (args.gibbs_sampling(seed=random.randint(1, 1000), min_iter=min_iter, max_iter=max_iter,  # burn_in=burn_in,
                                 batch=batch, simulated_data=sample_1, n_sampling=True, F_fraction=F_fraction,
                                 pi_2D=pi_2D, th=th, every_n_sample=every_n_sample, changes_batch=changes_batch))
 
 def run_in_parallel_n(args):
-    return (args.gibbs_sampling(seed=random.randint(1, 100), min_iter=min_iter, max_iter=max_iter,  # burn_in=burn_in,
+    return (args.gibbs_sampling(seed=random.randint(1, 1000), min_iter=min_iter, max_iter=max_iter,  # burn_in=burn_in,
                                 batch=batch, simulated_data=sample_1, n_sampling=False, F_fraction=F_fraction,
                                 pi_2D=pi_2D, th=th, every_n_sample=every_n_sample, changes_batch=changes_batch))
 
@@ -166,7 +166,7 @@ for file in glob.glob(config_file + "/*.json"):
     for cc in range(constants.CHAINS):
         tum_objs.append(
             tum.tumoroscope(name=constants.RESULTS+'/'+file_name+'_chain_'+str(cc),
-                            K=sample_1.K, S=sample_1.S, g=sample_1.g, r=phi_gamma[0], p=phi_gamma[1],
+                            K=sample_1.K, S=sample_1.S, g=sample_1.g, r=None, p=None,
                             I=sample_1.I, avarage_clone_in_spot=sample_1.avarage_clone_in_spot, F=F,
                             C=sample_1.C, A=sample_1.A, D=sample_1.D, F_epsilon=F_epsilon, 
                             optimal_rate=optimal_rate, n_lambda=n_lambda_tum, pi_2D=pi_2D,
